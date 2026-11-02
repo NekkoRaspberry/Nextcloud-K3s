@@ -59,7 +59,7 @@ jobs_del() {
   [[ -z "$ids" ]] && return 0
   # One exec for all jobs; "y" answers the "really delete?" question
   kubectl exec -n "$NS" deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c \
-    "for id in $ids; do echo y | php /var/www/html/occ background-job:delete \$id >/dev/null; done"
+    "for id in $ids; do echo y | php /var/www/html/occ background-job:delete \$id >/dev/null 2>&1; done"
 }
 
 # Admin login (Secret nextcloud-admin)
