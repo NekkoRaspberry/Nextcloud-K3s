@@ -1,0 +1,100 @@
+# Nightly backup of Nextcloud's files (the database is backed up by Postgres-K3s at 03:00).
+# Each run creates a folder <date>/ (one per day, a second run the same day replaces it) with:
+#   config/        - settings, including the instance secret (needed to restore)
+#   data/          - every user's files and photos
+#   custom_apps/, themes/
+# Unchanged files are hard links to the previous day: every folder is complete,
+# but only new or changed files use space. Backups older than 7 days are deleted.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nextcloud-backup
+  namespace: nextcloud
+spec:
+  schedule: "30 3 * * *"         # every day at 03:30 (after the database backup)
+  timeZone: "Europe/Lisbon"
+  concurrencyPolicy: Forbid      # never run two backups at once
+  # If the Pi was off at 03:30, run the missed backup when it starts again
+  # (only if the missed time was within the last 7 days)
+  startingDeadlineSeconds: 604800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400   # remove finished jobs after 1 day
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: backup
+              # Same image as Nextcloud (already on the Pi, includes rsync)
+              image: nextcloud:34.0.5-apache
+              env:
+                - name: KEEP_DAYS
+                  value: "7"
+                # Name of this job, used to tell test runs apart from real backups
+                - name: JOB_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.labels['job-name']
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  case "$JOB_NAME" in
+                    # Test runs get their own folder and never replace a real backup
+                    nextcloud-backup-test-*) NAME="test_$(date +%Y-%m-%d_%H%M%S)" ;;
+                    *) NAME="$(date +%Y-%m-%d)" ;;
+                  esac
+                  # Write to a .partial folder first, rename when complete
+                  WORK="/backup/$NAME.partial"
+                  rm -rf "$WORK"
+                  mkdir -p "$WORK"
+                  chown 1000:1000 "$WORK"
+                  chmod 700 "$WORK"
+                  # Newest real backup: unchanged files become hard links to it
+                  PREV="$(ls -1d /backup/20??-??-?? 2>/dev/null | tail -n 1)"
+                  # Files belong to you (rasp) and are readable only by you.
+                  # Previews and the log are skipped (Nextcloud recreates them).
+                  rsync -a ${PREV:+--link-dest="$PREV"} --chown=1000:1000 --chmod=D700,F600 \
+                    --exclude='/data/appdata_*/preview/' --exclude='/data/nextcloud.log' \
+                    /nextcloud/config /nextcloud/data /nextcloud/custom_apps /nextcloud/themes "$WORK/"
+                  # Only one backup per day: replace today's previous one
+                  rm -rf "/backup/$NAME"
+                  mv "$WORK" "/backup/$NAME"
+                  touch "/backup/$NAME"
+                  # Retention: delete backups older than KEEP_DAYS
+                  find /backup -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -exec rm -rf {} +
+                  echo "Backup OK: $NAME"
+                  du -sh "/backup/$NAME"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  # Only what is needed to read Nextcloud's files and write them as you
+                  drop: ["ALL"]
+                  add: ["CHOWN", "DAC_OVERRIDE", "DAC_READ_SEARCH", "FOWNER"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: nextcloud
+                  mountPath: /nextcloud
+                  readOnly: true
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            # Nextcloud's storage, read only
+            - name: nextcloud
+              persistentVolumeClaim:
+                claimName: nextcloud-data
+                readOnly: true
+            # Destination folder on the Pi. Change this path to move backups
+            # (e.g. /mnt/backup on an SSD, USB drive or NAS share).
+            - name: backup
+              hostPath:
+                path: /home/rasp/projects/System/Nextcloud-K3s/backup/data
+                type: Directory

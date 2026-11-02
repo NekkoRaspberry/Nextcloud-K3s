@@ -22,10 +22,10 @@ jobs:
       # Scripts: syntax and real errors
       - name: Check scripts
         run: |
-          for f in tests/*.sh; do bash -n "$f"; done
+          for f in backup/*.sh tests/*.sh; do bash -n "$f"; done
           # Preinstalled on ubuntu-latest; installed on nekko-runners
           command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
-          shellcheck --severity=error tests/*.sh
+          shellcheck --severity=error backup/*.sh tests/*.sh
 
       # Manifest: valid Kubernetes objects
       # Picks the build for this machine: amd64 (ubuntu-latest) or arm64 (nekko-runners on the Pi)
@@ -37,4 +37,7 @@ jobs:
             *) echo "Unsupported CPU: $(uname -m)"; exit 1 ;;
           esac
           curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-$ARCH.tar.gz" | tar xz kubeconform
-          ./kubeconform -strict -summary nextcloud.yaml
+          # Traefik's Middleware type comes from the community CRD catalog
+          ./kubeconform -strict -summary -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            nextcloud.yaml backup/cronjob.yaml

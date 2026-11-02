@@ -7,6 +7,7 @@ TEST_NS=nctest           # temporary namespace for the helper pod (deleted by ru
 CLIENT=nctest-client     # helper pod with curl, acts like a browser or the Nextcloud app
 HOST=nextcloud.home.arpa # the name Nextcloud answers to
 URL=http://nextcloud.nextcloud.svc.cluster.local
+BACKUP="$ROOT/backup/data"  # backup folder on the Pi (hostPath in backup/cronjob.yaml)
 FAILS=0
 
 pass() { echo "  PASS  $1"; }
@@ -34,11 +35,11 @@ nextcloud_pod() { kubectl get pod -n "$NS" -l app=nextcloud -o jsonpath='{.items
 # Run a Nextcloud command (occ) as the web server user. Usage: occ user:list
 occ() { kubectl exec -n "$NS" deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c "php /var/www/html/occ $*"; }
 
-# Does this Nextcloud user exist?
-has_user() { occ user:info "$1" >/dev/null 2>&1; }
-
 # Is any user name matching this in the user list? (regex allowed, e.g. "nctest[a-z]*")
 users_match() { occ user:list | grep -q -- "- $1:"; }
+
+# Does this Nextcloud user exist? (asks the list: "user:info" logs an error for unknown users)
+has_user() { users_match "$1"; }
 
 # Create / delete a test user (users are normally managed in the web UI).
 # Usage: user_add <name> <password>   (password goes in through stdin, not a command line)
@@ -46,7 +47,20 @@ user_add() {
   printf '%s\n' "$2" | kubectl exec -i -n "$NS" deploy/nextcloud -c nextcloud -- sh -c \
     "read -r OC_PASS; export OC_PASS; su -s /bin/sh www-data -c 'php /var/www/html/occ user:add --password-from-env $1'"
 }
-user_del() { occ user:delete "$1"; }
+user_del() { occ user:delete "$1" && jobs_del "$1"; }
+
+# Background jobs Nextcloud queued for a user's files. A deleted user's jobs
+# would fail (and fill the log) on the next cron run, so remove them too.
+# Usage: jobs_for <user-regex>   jobs_del <user>
+jobs_for() { occ background-job:list --limit=1000 | grep -E "\"$1\"" | awk -F'|' '{gsub(/ /, "", $2); print $2}'; }
+jobs_del() {
+  local ids
+  ids="$(jobs_for "$1" | tr '\n' ' ')"
+  [[ -z "$ids" ]] && return 0
+  # One exec for all jobs; "y" answers the "really delete?" question
+  kubectl exec -n "$NS" deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c \
+    "for id in $ids; do echo y | php /var/www/html/occ background-job:delete \$id >/dev/null; done"
+}
 
 # Admin login (Secret nextcloud-admin)
 admin_user() { kubectl get secret -n "$NS" nextcloud-admin -o jsonpath='{.data.username}' | base64 -d; }

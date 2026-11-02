@@ -3,3 +3,6 @@
 *.env
 *.pem
 *.key
+
+# Never commit backups (they contain every file and the instance secret)
+backup/data/

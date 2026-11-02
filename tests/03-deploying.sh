@@ -4,9 +4,9 @@
 source "$(dirname "$0")/lib.sh"
 echo "== 03 Deploying"
 
-check "manifest is valid (server dry-run)" kubectl apply --dry-run=server -f "$ROOT/nextcloud.yaml"
+check "manifests are valid (server dry-run)" kubectl apply --dry-run=server -f "$ROOT/nextcloud.yaml" -f "$ROOT/backup/cronjob.yaml"
 # kubectl diff returns 0 when the cluster matches the file exactly
-check "cluster matches the file (no drift)" kubectl diff -f "$ROOT/nextcloud.yaml"
+check "cluster matches the files (no drift)" kubectl diff -f "$ROOT/nextcloud.yaml" -f "$ROOT/backup/cronjob.yaml"
 
 # Upload a file, restart Nextcloud, check the user and the file are still there
 P=nctestp

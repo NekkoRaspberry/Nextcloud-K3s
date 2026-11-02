@@ -35,6 +35,11 @@ check "files refuse access without login" test "$(dav "" "" PROPFIND "")" = 401
 check "admin can log in"                  test "$(dav "$(admin_user)" "$(admin_pass)" PROPFIND "$(admin_user)/")" = 207
 check "HTTPS works on the home network ($LAN)" contains \
   "$(kubectl exec -n "$TEST_NS" "$CLIENT" -- curl -sk --resolve "$HOST:443:$LAN" "https://$HOST/status.php")" '"installed":true'
+check "browsers are told to always use HTTPS (HSTS)" contains \
+  "$(kubectl exec -n "$TEST_NS" "$CLIENT" -- curl -skI --resolve "$HOST:443:$LAN" "https://$HOST/status.php")" "max-age=15552000"
+check "heavy daily jobs run at night (maintenance window)" \
+  test "$(occ config:system:get maintenance_window_start)" = 1
+check "nightly file backup is scheduled" kubectl get cronjob -n "$NS" nextcloud-backup
 
 # Background jobs switch to cron after the first run (5 minutes after install)
 if [[ "$(occ config:app:get core backgroundjobs_mode 2>/dev/null)" == cron ]]; then pass "background jobs run by cron"
