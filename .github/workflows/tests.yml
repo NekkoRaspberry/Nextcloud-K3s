@@ -1,0 +1,40 @@
+# Check the files on every push to main or dev.
+# Works on ubuntu-latest (GitHub) and nekko-runners (the Pi); needs no access to the cluster.
+# The real tests run on the Pi: ./tests/run-all.sh
+name: Nextcloud Checks
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # runs-on: nekko-runners  #  nekko-runners requires a private repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      # Scripts: syntax and real errors
+      - name: Check scripts
+        run: |
+          for f in tests/*.sh; do bash -n "$f"; done
+          # Preinstalled on ubuntu-latest; installed on nekko-runners
+          command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+          shellcheck --severity=error tests/*.sh
+
+      # Manifest: valid Kubernetes objects
+      # Picks the build for this machine: amd64 (ubuntu-latest) or arm64 (nekko-runners on the Pi)
+      - name: Check manifest
+        run: |
+          case "$(uname -m)" in
+            x86_64)  ARCH=amd64 ;;
+            aarch64) ARCH=arm64 ;;
+            *) echo "Unsupported CPU: $(uname -m)"; exit 1 ;;
+          esac
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-$ARCH.tar.gz" | tar xz kubeconform
+          ./kubeconform -strict -summary nextcloud.yaml

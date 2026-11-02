@@ -1,0 +1,5 @@
+# Never commit passwords or keys
+.env
+*.env
+*.pem
+*.key

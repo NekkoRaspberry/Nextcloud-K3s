@@ -1,0 +1,180 @@
+# Nextcloud for K3s: namespace, internal service, HTTPS address, storage and Nextcloud itself
+# Apply with: kubectl apply -f nextcloud.yaml
+# Needs the Secrets nextcloud-db (Postgres-K3s), nextcloud-email (Mailpit-K3s) and nextcloud-admin
+
+# Separate namespace for Nextcloud
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nextcloud
+---
+# Internal address (ClusterIP): nextcloud.nextcloud.svc.cluster.local:80
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextcloud
+  namespace: nextcloud
+spec:
+  type: ClusterIP
+  selector:
+    app: nextcloud
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+---
+# Home network address: https://nextcloud.home.arpa (Traefik, built into K3s)
+# Pi-hole points that name to the Pi. Not reachable from the internet (only through WireGuard).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nextcloud
+  namespace: nextcloud
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure   # HTTPS only
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: nextcloud.home.arpa
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nextcloud
+                port:
+                  number: 80
+---
+# Nextcloud program, settings and all user files, kept when Nextcloud restarts.
+# NOTE: on the SD card for now; move to the SSD when it is installed.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nextcloud-data
+  namespace: nextcloud
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+# One Nextcloud for files and photos.
+# Database: shared PostgreSQL. Email: shared Mailpit.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextcloud
+  namespace: nextcloud
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # stop the old pod before starting the new one (storage can only be used by one)
+  selector:
+    matchLabels:
+      app: nextcloud
+  template:
+    metadata:
+      labels:
+        app: nextcloud
+    spec:
+      containers:
+        - name: nextcloud
+          # Official image, supports ARM64
+          image: nextcloud:34.0.5-apache
+          env:
+            - name: TZ
+              value: Europe/Lisbon
+            # First admin account (Secret nextcloud-admin, used on first start only)
+            - name: NEXTCLOUD_ADMIN_USER
+              valueFrom: { secretKeyRef: { name: nextcloud-admin, key: username } }
+            - name: NEXTCLOUD_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: nextcloud-admin, key: password } }
+            - name: NEXTCLOUD_TRUSTED_DOMAINS
+              value: nextcloud.home.arpa
+            # Own database in the shared PostgreSQL (Secret from Postgres-K3s/new-app-db.sh)
+            - name: POSTGRES_HOST
+              valueFrom: { secretKeyRef: { name: nextcloud-db, key: host } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: nextcloud-db, key: database } }
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: nextcloud-db, key: username } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: nextcloud-db, key: password } }
+            # Own email login in the shared Mailpit (Secret from Mailpit-K3s/new-app-email.sh)
+            - name: SMTP_HOST
+              valueFrom: { secretKeyRef: { name: nextcloud-email, key: host } }
+            - name: SMTP_PORT
+              valueFrom: { secretKeyRef: { name: nextcloud-email, key: port } }
+            - name: SMTP_NAME
+              valueFrom: { secretKeyRef: { name: nextcloud-email, key: username } }
+            - name: SMTP_PASSWORD
+              valueFrom: { secretKeyRef: { name: nextcloud-email, key: password } }
+            - name: MAIL_FROM_ADDRESS
+              value: nextcloud
+            - name: MAIL_DOMAIN
+              value: nekkoraspberry.local
+            # Behind Traefik (HTTPS ends there)
+            - name: TRUSTED_PROXIES
+              value: 10.42.0.0/16
+            - name: OVERWRITEPROTOCOL
+              value: https
+            - name: OVERWRITECLIURL
+              value: https://nextcloud.home.arpa
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          # The first start installs Nextcloud (can take several minutes on the Pi)
+          startupProbe:
+            httpGet:
+              path: /status.php
+              port: 80
+              httpHeaders: [{ name: Host, value: nextcloud.home.arpa }]
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /status.php
+              port: 80
+              httpHeaders: [{ name: Host, value: nextcloud.home.arpa }]
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /status.php
+              port: 80
+              httpHeaders: [{ name: Host, value: nextcloud.home.arpa }]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/www/html
+        # Background jobs (cleanup, previews, notifications) every 5 minutes
+        - name: cron
+          image: nextcloud:34.0.5-apache
+          command: ["/cron.sh"]
+          env:
+            - name: TZ
+              value: Europe/Lisbon
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/www/html
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nextcloud-data
