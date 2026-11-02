@@ -37,7 +37,7 @@ check "HTTPS works on the home network ($LAN)" contains \
   "$(kubectl exec -n "$TEST_NS" "$CLIENT" -- curl -sk --resolve "$HOST:443:$LAN" "https://$HOST/status.php")" '"installed":true'
 
 # Background jobs switch to cron after the first run (5 minutes after install)
-if [[ "$(occ config:app:get core backgroundjobs_mode)" == cron ]]; then pass "background jobs run by cron"
+if [[ "$(occ config:app:get core backgroundjobs_mode 2>/dev/null)" == cron ]]; then pass "background jobs run by cron"
 else warn "background jobs not on cron yet (first run 5 minutes after install)"; fi
 
 # Memory of the web container: below 80% of the 1Gi limit

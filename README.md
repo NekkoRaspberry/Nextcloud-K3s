@@ -37,8 +37,8 @@ Needs Postgres-K3s and Mailpit-K3s running, and Pihole-K3s for the name `nextclo
 ```bash
 export KUBECONFIG=~/.kube/config
 kubectl create namespace nextcloud
-../Postgres-K3s/new-app-db.sh nextcloud nextcloud       # Secret nextcloud-db
-../Mailpit-K3s/new-app-email.sh nextcloud nextcloud     # Secret nextcloud-email
+../../Development/Postgres-K3s/new-app-db.sh nextcloud nextcloud      # Secret nextcloud-db
+../../Development/Mailpit-K3s/new-app-email.sh nextcloud nextcloud    # Secret nextcloud-email
 kubectl create secret generic nextcloud-admin -n nextcloud \
   --from-literal=username=admin --from-literal=password="$(openssl rand -hex 16)"
 kubectl apply -f nextcloud.yaml
