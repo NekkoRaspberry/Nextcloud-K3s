@@ -17,6 +17,8 @@ One Nextcloud on K3s: a private cloud for files and photos. It uses the shared P
 | Memory limit | 1 Gi web, 512 Mi background jobs |
 | Admin login | Secret `nextcloud-admin` |
 
+> `<PI_IP>` is the Pi's address on your home network (`hostname -I`, first value).
+
 ## Files
 
 | File | Purpose |
