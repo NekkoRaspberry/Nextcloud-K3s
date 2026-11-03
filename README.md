@@ -56,7 +56,7 @@ kubectl apply -f backup/cronjob.yaml
 
 On a device that uses Pi-hole (home network or WireGuard), open https://nextcloud.home.arpa.
 
-The certificate is Traefik's self-signed one, so the browser and the Nextcloud app show a warning the first time; accept it. A device that does not use Pi-hole can add `<PI_IP> nextcloud.home.arpa` to its hosts file.
+The certificate comes from the home CA: install it once on each device (see Pihole-K3s, "HTTPS certificate") and the browser, the Nextcloud app and the desktop client trust it. A device that does not use Pi-hole can add `<PI_IP> nextcloud.home.arpa` to its hosts file.
 
 Admin password:
 ```bash

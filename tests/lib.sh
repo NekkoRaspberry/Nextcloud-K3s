@@ -57,9 +57,10 @@ jobs_del() {
   local ids
   ids="$(jobs_for "$1" | tr '\n' ' ')"
   [[ -z "$ids" ]] && return 0
-  # One exec for all jobs; "y" answers the "really delete?" question
+  # One exec for all jobs; "y" answers the "really delete?" question.
+  # A job cron already ran meanwhile is gone: fine (99-leftovers checks nothing is left).
   kubectl exec -n "$NS" deploy/nextcloud -c nextcloud -- su -s /bin/sh www-data -c \
-    "for id in $ids; do echo y | php /var/www/html/occ background-job:delete \$id >/dev/null 2>&1; done"
+    "for id in $ids; do echo y | php /var/www/html/occ background-job:delete \$id >/dev/null 2>&1; done; true"
 }
 
 # Admin login (Secret nextcloud-admin)
